@@ -228,7 +228,12 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         low_cpu_mem_usage=args.low_cpu_mem_usage,
+        torch_dtype=torch.float16,  # <--- This cuts memory usage in half
     )
+
+    # Add these two lines right here:
+    model.gradient_checkpointing_enable()
+    model.enable_input_require_grads()
 
     if args.use_special_tokens is True:
         special_token_dict = SPECIAL_TOKENS
