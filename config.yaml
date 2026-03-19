@@ -5,7 +5,7 @@ output_dir: "/model"
 #dataset_name: "zorowin123/rq_rag"
 
 # LoRA Configuration
-use_lora: false
+use_lora: true
 lora_rank: 64
 lora_alpha: 16.0
 lora_dropout: 0.1
@@ -13,12 +13,12 @@ save_merged_lora_model: false
 
 # Training Configuration
 max_seq_length: 512
-per_device_train_batch_size: 8
+per_device_train_batch_size: 2
 learning_rate: 0.00005
 weight_decay: 0.0
 num_train_epochs: 3
 max_train_steps: null
-gradient_accumulation_steps: 1
+gradient_accumulation_steps: 8
 lr_scheduler_type: "linear"
 warmup_ratio: 0
 seed: 42
