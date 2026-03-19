@@ -275,7 +275,7 @@ def main():
             encode_with_messages_format,
             tokenizer=tokenizer,
             max_seq_length=args.max_seq_length,
-            context_markups=(context_markups if args.use_special_tokens is True else None),
+            #context_markups=(context_markups if args.use_special_tokens is True else None),
             mask_retrieved_paragraph=True if args.mask_retrieved_paragraph else False,
         )
 
