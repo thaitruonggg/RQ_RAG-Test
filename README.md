@@ -13,7 +13,7 @@ The code has been rewritten to focus on training new LLMs like Llama-3.2. The us
 ```bash
 rq_rag/
    ├── train_rq_rag.py
-   ├── train_rq_rag_config.yaml
+   ├── config.yaml
    └── requirements.txt
 ```
 

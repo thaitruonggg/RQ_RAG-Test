@@ -213,10 +213,7 @@ def main():
     accelerator.wait_for_everyone()
 
     # Downloading and loading a dataset from the hub.
-    raw_datasets = load_dataset(
-        args.dataset_name,
-        args.dataset_config_name,
-    )
+    raw_datasets = load_dataset("json", data_files="train.jsonl")
 
     if args.sample_train_data != "all":
         n_sample = int(args.sample_train_data)
