@@ -1,45 +1,53 @@
+import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
 # ==========================================
-# 1. SETUP THE VECTOR DATABASE (RETRIEVAL)
+# 1. SETUP THE MULTI-DOC VECTOR DATABASE
 # ==========================================
-print("📚 Loading and indexing document...")
+DOCS_PATH = "documents"
+DB_PATH = "./chroma_db_storage"
 
-# Load your Vietnamese PDF
-pdf_path = "paper.pdf"
-loader = PyPDFLoader(pdf_path)
+print("📚 Indexing research documents...")
+
+# Create the folder if it doesn't exist
+if not os.path.exists(DOCS_PATH):
+    os.makedirs(DOCS_PATH)
+    print(f"⚠️ Created {DOCS_PATH} folder. Put your PDFs there and restart.")
+
+# Load all PDFs from the directory
+loader = DirectoryLoader(DOCS_PATH, glob="**/*.pdf", loader_cls=PyPDFLoader)
 docs = loader.load()
 
-# Split the document into bite-sized paragraphs
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+# Split documents into chunks
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
 chunks = text_splitter.split_documents(docs)
 
-# Initialize the multilingual embedding model (Crucial for Vietnamese text!)
+# Initialize multilingual embeddings
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-# Create the local Vector Database
-vector_db = Chroma.from_documents(chunks, embeddings)
+# Create/Load persistent Vector Database
+vector_db = Chroma.from_documents(
+    documents=chunks,
+    embedding=embeddings,
+    persist_directory=DB_PATH
+)
 
-# Set up the retriever to fetch the top 5 most relevant chunks to avoid missing data
-retriever = vector_db.as_retriever(search_kwargs={"k": 5})
+# Retriever setup (k=5 provides a good balance of context vs noise)
+retriever = vector_db.as_retriever(search_kwargs={"k": 7})
 
 # ==========================================
-# 2. SETUP THE FAST MERGED MODEL (GENERATION)
+# 2. SETUP THE FAST MERGED MODEL
 # ==========================================
-print("⚡ Loading merged model in 4-bit quantization for maximum speed...")
+print("⚡ Loading merged model in 4-bit...")
 
-# Point this to your NEW, merged model folder created by the merge script
 model_path = "merged_rag_model"
-
-# The compression config for speed and low RAM usage
 quantization_config = BitsAndBytesConfig(load_in_4bit=True)
 
-# Load the tokenizer and the single, unified model
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
@@ -50,7 +58,7 @@ model.eval()
 
 
 # ==========================================
-# 3. THE RAG PIPELINE FUNCTION
+# 3. THE REFINED RAG PIPELINE
 # ==========================================
 def clean_rag_output(raw_text):
     """Removes looping artifacts and fake Q&A generations."""
@@ -69,80 +77,71 @@ def clean_rag_output(raw_text):
 
     return raw_text.strip()
 
-
 def ask_rq_rag_chatbot(user_question):
     print(f"\n👤 USER QUESTION: '{user_question}'")
 
-    # 1. Prepare the messages exactly like your train.jsonl
-    # Note: We use a general RAG system prompt to trigger the logic
-    messages = [
-        {"role": "system",
-         "content": "You are a research assistant. Use the provided evidence to answer the question accurately."},
-        {"role": "user", "content": user_question}
-    ]
+    # 1. RETRIEVAL (The most important part for accuracy)
+    retrieved_docs = retriever.invoke(user_question)
 
-    # Use the tokenizer's built-in template to format the string perfectly
-    prompt_stage_1 = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    # Track sources for your display
+    source_files = set([os.path.basename(doc.metadata.get('source')) for doc in retrieved_docs])
 
-    # 2. STAGE 1: Generate the Rewrite Tag
-    inputs_1 = tokenizer(prompt_stage_1, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        outputs_1 = model.generate(
-            **inputs_1,
-            max_new_tokens=50,
-            temperature=0.1,
-            eos_token_id=tokenizer.eos_token_id
-        )
+    # Combine the evidence text clearly
+    evidence_text = "\n".join([doc.page_content for doc in retrieved_docs])
 
-    # Extract only the newly generated text (the rewrite part)
-    stage_1_gen = tokenizer.decode(outputs_1[0][inputs_1.input_ids.shape[1]:], skip_special_tokens=True)
+    # --- DEBUG: Uncomment this if you still get wrong answers to see what the AI sees ---
+    # print(f"DEBUG: Evidence chunk: {evidence_text[:200]}...")
 
-    # Logic to extract the rewritten query
-    search_query = user_question  # Fallback
-    if "[S_Rewritten_Query]" in stage_1_gen:
-        search_query = stage_1_gen.split("[S_Rewritten_Query]")[-1].split("[")[0].strip()
-        print(f"✨ MODEL REWROTE QUERY TO: '{search_query}'")
+    # 2. THE "PRE-FILLED" PROMPT
+    # We use Llama 3 tags but MANUALLY start the assistant's response.
+    # This forces the model to skip the 'Helpful Assistant' talk and go straight to RQ-RAG mode.
+    print("\n--- DEBUG: WHAT THE DATABASE FOUND ---")
+    for i, doc in enumerate(retrieved_docs):
+        print(f"Chunk {i + 1}: {doc.page_content[:200]}...")
+    print("---------------------------------------\n")
 
-    # 3. STAGE 2: Retrieval
-    print(f"📚 Searching database...")
-    retrieved_docs = retriever.invoke(search_query)
-    real_evidence = "\n".join([f"Text: {doc.page_content}" for doc in retrieved_docs])
-
-    # 4. STAGE 3: Final Answer
-    # We reconstruct the full sequence: [S_Rewritten_Query] -> [R_Evidences] -> [A_Response]
-    full_prompt = (
-        f"{prompt_stage_1}{stage_1_gen.split('[R_Evidences]')[0].strip()}\n"
-        f"[R_Evidences]\n{real_evidence}\n[/R_Evidences]\n"
-        f"[A_Response]"
+    prompt = (
+        f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+        f"Bạn là một trợ lý nghiên cứu khoa học. Chỉ sử dụng thông tin trong [R_Evidences] để trả lời. "
+        f"Nếu không thấy số liệu chính xác trong tài liệu, hãy trả lời 'Tôi không tìm thấy số liệu này'.<|eot_id|>"
+        f"<|start_header_id|>user<|end_header_id|>\n\n"
+        f"Câu hỏi: {user_question}\n\n"
+        f"[R_Evidences]\n{evidence_text}\n[/R_Evidences]<|eot_id|>"
+        f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+        f"[A_Response]\n"
     )
 
-    inputs_2 = tokenizer(full_prompt, return_tensors="pt").to(model.device)
+    # 3. GENERATION
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
     with torch.no_grad():
-        outputs_2 = model.generate(
-            **inputs_2,
-            max_new_tokens=150,
-            temperature=0.1,
-            repetition_penalty=1.15,
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=100,  # Keep it short to prevent loops
+            temperature=0.1,  # Zero variability for research facts
+            repetition_penalty=1.2,  # Stop it from echoing the question
+            pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id
         )
 
-    full_gen = tokenizer.decode(outputs_2[0][inputs_2.input_ids.shape[1]:], skip_special_tokens=True)
+    # 4. DECODE ONLY THE NEW STUFF
+    # We only decode what the model added AFTER our pre-filled prompt
+    generated_ids = outputs[0][inputs.input_ids.shape[1]:]
+    final_answer = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
-    # Clean up and return
-    final_answer = full_gen.split("[A_Response]")[-1].strip()
-    return clean_rag_output(final_answer)
+    # Clean and Format
+    clean_answer = clean_rag_output(final_answer)
+    return f"{clean_answer}\n\n📌 Nguồn: {', '.join(source_files)}"
 
 
 # ==========================================
-# 4. CHAT WITH YOUR DATA
+# 4. EXECUTION
 # ==========================================
 if __name__ == "__main__":
-    print("\n✅ System ready! Ask a question about your paper.")
+    print("\n✅ System ready! Ask a question about your research library.")
 
-    # A highly specific test question to grab the right context
-    my_question = "Mô hình MaMa được huấn luyện trên tập dữ liệu nào"
-
-    answer = ask_rq_rag_chatbot(my_question)
+    query = "Mô hình MaMa có bao nhiêu phiên bản?"
+    result = ask_rq_rag_chatbot(query)
 
     print("\n🤖 CHATBOT ANSWER:")
-    print(answer)
+    print(result)
