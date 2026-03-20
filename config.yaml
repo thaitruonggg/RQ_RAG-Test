@@ -17,7 +17,7 @@ per_device_train_batch_size: 1
 learning_rate: 0.0002     # Increased from 5e-5 for faster LoRA learning
 weight_decay: 0.01        # Added slight decay to prevent memorization
 num_train_epochs: 1
-max_train_steps: 800      # HARD STOP to prevent the 5-hour flatline!
+#max_train_steps: 800      # HARD STOP to prevent the 5-hour flatline!
 gradient_accumulation_steps: 8
 lr_scheduler_type: "cosine" # Changed from linear for a smoother finish
 warmup_ratio: 0.05        # Give it a gentle start before hitting peak learning rate
