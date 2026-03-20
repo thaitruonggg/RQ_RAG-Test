@@ -24,7 +24,7 @@ warmup_ratio: 0.05        # Give it a gentle start before hitting peak learning 
 seed: 42
 preprocessing_num_workers: 4
 overwrite_cache: false
-checkpointing_steps: 200  # Save a backup every 200 steps
+checkpointing_steps: "200"  # Save a backup every 200 steps
 logging_steps: 50
 resume_from_checkpoint: null
 with_tracking: false
