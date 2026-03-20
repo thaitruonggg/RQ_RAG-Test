@@ -140,7 +140,7 @@ def ask_rq_rag_chatbot(user_question):
 if __name__ == "__main__":
     print("\n✅ System ready! Ask a question about your research library.")
 
-    query = "Mô hình MaMa có bao nhiêu phiên bản?"
+    query = "Yêu cầu hệ điều hành để sử dụng samsung portable ssd là gì?"
     result = ask_rq_rag_chatbot(query)
 
     print("\n🤖 CHATBOT ANSWER:")

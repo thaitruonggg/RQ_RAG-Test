@@ -6,33 +6,33 @@ output_dir: "/kaggle/working/model"
 
 # LoRA Configuration
 use_lora: true
-lora_rank: 64
-lora_alpha: 16.0
-lora_dropout: 0.1
+lora_rank: 16             # Reduced from 64 to save memory & prevent overfitting
+lora_alpha: 32.0          # Must be 2x the rank! (Was previously 16)
+lora_dropout: 0.05        # Lowered slightly to retain more base knowledge
 save_merged_lora_model: false
 
 # Training Configuration
-max_seq_length: 1024 #default 512
+max_seq_length: 2048      # Bumped up so it can read your 600-character chunks!
 per_device_train_batch_size: 1
-learning_rate: 0.00005
-weight_decay: 0.0
+learning_rate: 0.0002     # Increased from 5e-5 for faster LoRA learning
+weight_decay: 0.01        # Added slight decay to prevent memorization
 num_train_epochs: 1
-max_train_steps: null
+max_train_steps: 800      # HARD STOP to prevent the 5-hour flatline!
 gradient_accumulation_steps: 8
-lr_scheduler_type: "linear"
-warmup_ratio: 0
+lr_scheduler_type: "cosine" # Changed from linear for a smoother finish
+warmup_ratio: 0.05        # Give it a gentle start before hitting peak learning rate
 seed: 42
 preprocessing_num_workers: 4
 overwrite_cache: false
-checkpointing_steps: null
-logging_steps: 100
+checkpointing_steps: 200  # Save a backup every 200 steps
+logging_steps: 50
 resume_from_checkpoint: null
 with_tracking: false
 report_to: "all"
 low_cpu_mem_usage: true
 use_special_tokens: true
 sample_train_data: "all"
-save_total_limit: 1
+save_total_limit: 2       # Keep the last 2 checkpoints
 mask_retrieved_paragraph: false
 wandb_project_name: "rq-rag"
-wandb_run_name: "rq-rag-v1"
+wandb_run_name: "rq-rag-v2-fixed"
