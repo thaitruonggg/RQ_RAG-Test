@@ -1,0 +1,4 @@
+.venv/
+model/
+merged_rag_model/
+chroma_db_storage/
